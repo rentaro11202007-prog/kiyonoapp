@@ -1,41 +1,37 @@
-# テスト用のシンプルなコンソールアプリまたはStreamlit / Pythonスクリプトを作成する
-# 提出用コードとして、PythonのインタラクティブなロジックまたはCLIアプリケーションを作成し、ファイルとして生成する。
-# 今回はテキストファイル（.pyなど）を生成する。
-
-code_content = '''# -*- coding: utf-8 -*-
-"""
-学食混雑分散シミュレーション・アプリ
-株式会社KIYONO インターン選考課題用コード
-"""
-
+# -*- coding: utf-8 -*-
 import time
 
 class CanteenApp:
     def __init__(self):
-        # 基準データ（各レーンの基本待ち時間と食べるのにかかる固定時間などの仮データ）
-        # 列1: カレー・うどん（回転率が高く空いている）
-        # 列2: からあげ丼・日替わり定選
-        # 列3: ラーメン・混ぜそば
         self.lanes = {
             "1": {"name": "1列目：カレー・うどん", "base_wait": 2, "eating_time": 5, "selected_count": 0},
             "2": {"name": "2列目：からあげ丼・日替わり", "base_wait": 12, "eating_time": 8, "selected_count": 0},
-            "3": {"name": "3列目：ラーメン・混ぜそば", "base_wait": 15, "eating_time": 10, "selected_count": 0}
+            "3": {"name": "3列目：ラーメン・混ぜそば", "base_wait": 15, "eating_time": 10, "selected_count": 0},
+            # いつでも選べる選択肢としてコンビニを常時組み込む
+            "c": {"name": "コンビニ・売店（常時確実）", "base_wait": 0, "eating_time": 3, "selected_count": 0}
         }
-        # ユーザーが選択するたびに加算される遅延時間（秒→分換算または直接加算）
-        # ここでは1人選ばれるごとに待ち時間が45秒（0.75分）増える仕様を実装
         self.add_seconds_per_selection = 45
 
     def get_current_wait_time(self, lane_key):
+        # コンビニは待ち時間0分で固定
+        if lane_key == "c":
+            return 0.0
+        
         lane = self.lanes[lane_key]
-        # 待ち時間（分） = 基本待ち時間 + (選択人数 * 45秒) / 60
         additional_minutes = (lane["selected_count"] * self.add_seconds_per_selection) / 60.0
         return lane["base_wait"] + additional_minutes
+
+    def decay_selected_counts(self):
+        """時間が経過（1ループ）したとみなし、学食の列の消化を進めて選択人数を1人減らす（0未満にはしない）"""
+        for key in self.lanes:
+            if key != "c" and self.lanes[key]["selected_count"] > 0:
+                self.lanes[key]["selected_count"] -= 1
 
     def run(self):
         print("=== 学食混雑分散アプリ（Canteen Optimizer） ===")
         while True:
             try:
-                user_input = input("\\nあと何分で昼食を終えたいですか？（分数を入力、終了はq）: ")
+                user_input = input("\nあと何分で昼食を終えたいですか？（分数を入力、終了はq）: ")
                 if user_input.lower() == 'q':
                     print("アプリを終了します。")
                     break
@@ -45,11 +41,15 @@ class CanteenApp:
                 print("有効な数値を入力してください。")
                 continue
 
-            # 各レーンの現在の所要時間を計算し、間に合うものをフィルタリング
+            # 判定を行うたびに学食の列の消化（減衰）を行う
+            self.decay_selected_counts()
+
+            # すべての選択肢（学食レーン ＋ コンビニ）を評価する
             valid_options = []
             for key, lane in self.lanes.items():
                 wait_time = self.get_current_wait_time(key)
                 total_time = wait_time + lane["eating_time"]
+                
                 if total_time <= target_time:
                     valid_options.append({
                         "key": key,
@@ -58,28 +58,27 @@ class CanteenApp:
                         "wait_time": wait_time
                     })
 
-            print(f"\\n--- 【判定結果】（目標: {target_time}分以内） ---")
+            print(f"\n--- 【判定結果】（目標: {target_time}分以内） ---")
             if valid_options:
                 print("以下の選択肢が間に合います：")
                 for opt in valid_options:
-                    print(f"[{opt['key']}] {opt['name']} (予想所要時間: 約 {opt['total_time']:.1f} 分 / 待ち: {opt['wait_time']:.1f}分)")
+                    if opt['key'] == 'c':
+                        print(f"[{opt['key']}] 🛒 {opt['name']} (予想所要時間: 約 {opt['total_time']:.1f} 分 / 待ち: {opt['wait_time']:.1f}分)")
+                    else:
+                        print(f"[{opt['key']}] 🍛 {opt['name']} (予想所要時間: 約 {opt['total_time']:.1f} 分 / 待ち: {opt['wait_time']:.1f}分)")
                 
-                choice = input("\\nどのレーンを選択しますか？（番号を入力 / キャンセルはc）: ")
-                if choice in self.lanes:
+                choice = input("\nどの選択肢にしますか？（番号を入力 / キャンセルはc、またはq）: ")
+                if choice in self.lanes and choice != "c":
                     self.lanes[choice]["selected_count"] += 1
                     print(f"-> {self.lanes[choice]['name']} が選択されました。リアルタイムで混雑状況（待ち時間）を更新しました。")
+                elif choice == "c":
+                    print("-> 『コンビニ・売店』が選択されました。確実に時間内に昼食を完了できます！")
                 else:
                     print("選択がキャンセルされました。")
             else:
                 print("⚠️ 現在、どの学食のレーンも目標時間内に間に合いません。")
-                print("【フォールバック提案】 学食での食事は諦め、近くの『コンビニ・売店』での購入を強く推奨します！")
+                print("【推奨】 時間が非常にタイトなため、今回は『c：コンビニ・売店』の利用を強く推奨します！")
 
 if __name__ == "__main__":
     app = CanteenApp()
     app.run()
-'''
-
-with open("canteen_app.py", "w", encoding="utf-8") as f:
-    f.write(code_content)
-
-print("canteen_app.py generated successfully.")
